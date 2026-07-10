@@ -127,7 +127,7 @@ The lists must have equal lengths."
 	 (if (null l2)
 	     '()
 	     (error "Lists have unequal lengths whe zipping (~a and ~a)" l1 l2)))
-q
+
 	((null l2)
 	 (error "Lists have unequal lengths whe zipping (~a and ~a)" l1 l2))
 
