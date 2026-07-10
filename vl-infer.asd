@@ -23,7 +23,7 @@
   :author "Simon Dobson <simoninireland@gmail.com"
   :version (:read-file-form "version.sexp")
   :license "GPL3"
-  :depends-on ("alexandria" "str" "esrap" "lisp-binary")
+  :depends-on ("alexandria" "str" "esrap" "parser.common-rules" "parse-float" "lisp-binary")
   :pathname "src/"
   :serial t
   :components (;; flatbuffers
@@ -42,6 +42,5 @@
   :serial t
   :components ((:file "package")
 	       (:file "test-utils")
-	       (:file "test-flatbuffer-parser")
-	       (:file "test-flatbuffers-structures"))
+	       (:file "test-flatbuffers-parser"))
   :perform (test-op (o c) (uiop:symbol-call :fiveam '#:run-all-tests)))
