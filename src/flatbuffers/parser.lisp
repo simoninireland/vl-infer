@@ -34,6 +34,22 @@ Add explicit whitespace parsesrs where needed."
      ,@options))
 
 
+(defmacro deftoken* (name rule)
+  "Define a simple token NAME that always returns NIL.
+
+RULE will typically be a single string or character."
+  `(defrule ,name
+       (and whitespace* ,rule whitespace*)
+     (:constant nil)))
+
+
+(defmacro deflistrule (name rule &body options)
+  "Define a rule NAME that matches a comma-separated list of RULE."
+  `(defrule ,name
+       (and ,rule (? (and comma ,rule)))
+     ,@options))
+
+
 ;;; ---------- Characters ----------
 
 (defrule point #\.)
@@ -49,18 +65,18 @@ Add explicit whitespace parsesrs where needed."
 ;;; ---------- Tokens ----------
 
 ;; delimiters
-(deftoken semi ";")
-(deftoken comma ",")
-(deftoken colon ":")
-(deftoken dot ".")
-(deftoken quotes "\"")
-(deftoken equals-sign "=")
-(deftoken open-curly "{")
-(deftoken close-curly "}")
-(deftoken open-square "[")
-(deftoken close-square "]")
-(deftoken open-round "(")
-(deftoken close-round ")")
+(deftoken* semi ";")
+(deftoken* comma ",")
+(deftoken* colon ":")
+(deftoken* dot ".")
+(deftoken* quotes "\"")
+(deftoken* equals-sign "=")
+(deftoken* open-curly "{")
+(deftoken* close-curly "}")
+(deftoken* open-square "[")
+(deftoken* close-square "]")
+(deftoken* open-round "(")
+(deftoken* close-round ")")
 
 
 ;; strings
@@ -130,16 +146,18 @@ Add explicit whitespace parsesrs where needed."
 
 
 ;; types
-(deftoken type (or "bool"
-		   "byte" "ubyte" "int8" "uint8"
-		   "short" "ushort" "int16" "uint16"
-		   "int" "uint" "int32" "uint32"
-		   "long" "ulong" "int64" "unit64"
-		   "float" "float32"
-		   "double" "float64"
-		   "string"
-		   (and open-square type close-square)
-		   ident))
+(deftoken simple-type (or "bool"
+			  "byte" "ubyte" "int8" "uint8"
+			  "short" "ushort" "int16" "uint16"
+			  "int" "uint" "int32" "uint32"
+			  "long" "ulong" "int64" "unit64"
+			  "float" "float32"
+			  "double" "float64"
+			  "string"))
+(deftoken complex-type (or (and open-square type closesquare)
+			   ident))
+
+(defrule type (or simple-type complex-type))
 
 
 ;;; ---------- Rules ----------
@@ -170,21 +188,24 @@ Add explicit whitespace parsesrs where needed."
 
 
 ;; types
+(defrule root-decl (and "root_type" whitespace+ ident semi))
+
 (defrule type-decl (and (or "table" "struct") whitespace+ ident metadata open-curly (* field-decl) close-curly))
 (defrule enum-decl (and (or (and "enum" whitespace+ ident colon whitespace* type)
 			    (and "union" whitespace+ ident))
 			metadata
 			open-curly (? (and enumval-decl (* (and comma enumval-decl)))) close-curly))
 
-(defrule root-decl (and "root_type" whitespace+ ident semi))
 
 (defrule field-decl (and ident colon whitespace* type whitespace* (? (and equals-sign (or scalar ident))) metadata semi))
 (defrule enumval-decl (and ident (? (and equals-sign integer-constant)) metadata))
 
 
 ;; metadata
+(deflistrule ident-single-value?-list
+    ident-single-value?)
 (defrule metadata (and whitespace*
-		       (? (and open-round ident-single-value? (* (and comma identi-single-value?)) close-round
+		       (? (and open-round ident-single-value?-list close-round
 			       whitespace*))))
 
 
@@ -199,7 +220,9 @@ Add explicit whitespace parsesrs where needed."
 (defrule ident-single-value? (and ident (? (and colon single-value))))
 (defrule object (and open-round (? (and ident-value (? (and comma ident-value)))) close-round))
 (defrule single-value (or scalar string-constant))
-(defrule value (or single-value object (and open-square (? (and value (? (and comma value)))) close-square)))
+(deflistrule value-list
+    value)
+(defrule value (or single-value object (and open-squarevalue-list close-square)))
 
 ;; file information
 (defrule file-extension-decl (and "file_extension" whitespace+ string-constant semi))
