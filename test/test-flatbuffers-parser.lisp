@@ -25,7 +25,7 @@
 
 (test test-flatbuffers-parse-example-1-from-file
   "Test we can parse eclectic.fbs from a file."
-  (is (fb::parse-fbs-schema "eclectic.fbs")))
+  (is (fb::parse-fbs-schema #P"eclectic.fbs")))
 
 
 (test test-flatbuffers-parse-example-1-from-stream
