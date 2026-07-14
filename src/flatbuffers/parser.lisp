@@ -38,9 +38,19 @@ Add explicit whitespace parsesrs where needed."
   "Define a simple token NAME that always returns NIL.
 
 RULE will typically be a single string or character."
-  `(defrule ,name
-       (and whitespace* ,rule whitespace*)
+  `(deftoken ,name
+       ,rule
      (:constant nil)))
+
+
+(defmacro defsymbol (name rule)
+  "Define a simple token NAME that always NAME as a symbol.
+
+RULE will typically be a single string or character."
+  `(deftoken ,name
+       ,rule
+     (:lambda (l)
+       (intern (upcase (text l))))))
 
 
 (defmacro deflistrule (name rule &body options)
@@ -146,15 +156,15 @@ RULE will typically be a single string or character."
 
 
 ;; types
-(deftoken simple-type (or "bool"
-			  "byte" "ubyte" "int8" "uint8"
-			  "short" "ushort" "int16" "uint16"
-			  "int" "uint" "int32" "uint32"
-			  "long" "ulong" "int64" "unit64"
-			  "float" "float32"
-			  "double" "float64"
-			  "string"))
-(deftoken complex-type (or (and open-square type closesquare)
+(defsymbol simple-type (or "bool"
+			   "byte" "ubyte" "int8" "uint8"
+			   "short" "ushort" "int16" "uint16"
+			   "int" "uint" "int32" "uint32"
+			   "long" "ulong" "int64" "unit64"
+			   "float" "float32"
+			   "double" "float64"
+			   "string"))
+(deftoken complex-type (or (and open-square type close-square)
 			   ident))
 
 (defrule type (or simple-type complex-type))
@@ -194,11 +204,19 @@ RULE will typically be a single string or character."
 (defrule enum-decl (and (or (and "enum" whitespace+ ident colon whitespace* type)
 			    (and "union" whitespace+ ident))
 			metadata
-			open-curly (? (and enumval-decl (* (and comma enumval-decl)))) close-curly))
+			open-curly (? (and enumval-decl (* (and comma enumval-decl)))) close-curly)
+  (:destructure (h &rest fields)
+		;; remove the unnecessary nesting caused by the OR rule
+		(append h fields)))
 
 
-(defrule field-decl (and ident colon whitespace* type whitespace* (? (and equals-sign (or scalar ident))) metadata semi))
-(defrule enumval-decl (and ident (? (and equals-sign integer-constant)) metadata))
+(defrule field-decl (and ident colon whitespace* type whitespace* (? (and equals-sign (or scalar ident))) metadata semi)
+  (:destructure (id w1 w2 ty w3 iv meta w4)
+		(declare (ignore w1 w2 w3 w4))
+		`(,id (:type ,ty) ,@(if iv `((:default ,iv))) ,meta)))
+(defrule enumval-decl (and ident (? (and equals-sign integer-constant)) metadata)
+  (:destructure (id expl meta)
+		`(,id ,@(if expl `((:default ,expl))) ,meta)))
 
 
 ;; metadata
@@ -206,7 +224,12 @@ RULE will typically be a single string or character."
     ident-single-value?)
 (defrule metadata (and whitespace*
 		       (? (and open-round ident-single-value?-list close-round
-			       whitespace*))))
+			       whitespace*)))
+  (:destructure (w1 m)
+		(declare (ignore w1))
+		(unless (null m)
+		  ;; we have metadata
+		  (cons :metadata m))))
 
 
 ;; RPC declarations
