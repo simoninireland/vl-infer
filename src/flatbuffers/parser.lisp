@@ -44,11 +44,11 @@ RULE will typically be a single string or character."
 
 
 (defmacro defsymbol (name rule)
-  "Define a simple token NAME that always NAME as a symbol.
+  "Define a simple token NAME that returns NAME as a symbol.
 
 RULE will typically be a single string or character."
   `(deftoken ,name
-       ,rule
+       (and whitespace* ,rule whitespace*)
      (:lambda (l)
        (intern (upcase (text l))))))
 
@@ -87,6 +87,19 @@ RULE will typically be a single string or character."
 (deftoken* close-square "]")
 (deftoken* open-round "(")
 (deftoken* close-round ")")
+
+;; keywords
+(defsymbol include "include")
+(defsymbol attribute "attribute")
+(defsymbol namespace "namespace")
+(defsymbol table "table")
+(defsymbol struct "struct")
+(defsymbol enum "enum")
+(defsymbol union "union")
+(defsymbol rpc-service "rpc_service")
+(defsymbol root-type "root_type")
+(defsymbol file-extension "file_extension")
+(defsymbol file-identifier "file_identifier")
 
 
 ;; strings
@@ -189,20 +202,20 @@ RULE will typically be a single string or character."
 			     whitespace*))))
 
 ;; inclusions
-(defrule include (and "include" whitespace+ string-constant semi))
+(defrule include (and include string-constant semi))
 
 
 ;; namespace and attributes
-(defrule namespace-decl (and "namespace" whitespace+ identifier (* (and dot identifier)) semi))
-(defrule attribute-decl (and "attribute" whitespace+ (or ident (and quotes ident quotes)) semi))
+(defrule namespace-decl (and namespace identifier (* (and dot identifier)) semi))
+(defrule attribute-decl (and attribute (or ident (and quotes ident quotes)) semi))
 
 
 ;; types
-(defrule root-decl (and "root_type" whitespace+ ident semi))
+(defrule root-decl (and root-type ident semi))
 
-(defrule type-decl (and (or "table" "struct") whitespace+ ident metadata open-curly (* field-decl) close-curly))
-(defrule enum-decl (and (or (and "enum" whitespace+ ident colon whitespace* type)
-			    (and "union" whitespace+ ident))
+(defrule type-decl (and (or table struct) ident metadata open-curly (* field-decl) close-curly))
+(defrule enum-decl (and (or (and enum ident colon type)
+			    (and union ident))
 			metadata
 			open-curly (? (and enumval-decl (* (and comma enumval-decl)))) close-curly)
   (:destructure (h &rest fields)
@@ -210,9 +223,9 @@ RULE will typically be a single string or character."
 		(append h fields)))
 
 
-(defrule field-decl (and ident colon whitespace* type whitespace* (? (and equals-sign (or scalar ident))) metadata semi)
-  (:destructure (id w1 w2 ty w3 iv meta w4)
-		(declare (ignore w1 w2 w3 w4))
+(defrule field-decl (and ident colon type (? (and equals-sign (or scalar ident))) metadata semi)
+  (:destructure (id w1 ty iv meta w4)
+		(declare (ignore w1 w4))
 		`(,id (:type ,ty) ,@(if iv `((:default ,iv))) ,meta)))
 (defrule enumval-decl (and ident (? (and equals-sign integer-constant)) metadata)
   (:destructure (id expl meta)
@@ -233,7 +246,7 @@ RULE will typically be a single string or character."
 
 
 ;; RPC declarations
-(defrule rpc-decl (and "rpc_service" whitespace+ ident open-round (+ rpc-method) close-round))
+(defrule rpc-decl (and rpc-service whitespace+ ident open-round (+ rpc-method) close-round))
 (defrule rpc-method (and ident whitespace? open-round ident close-round whitespace* colon ident metadata semi))
 
 ;; values and assignments
@@ -248,8 +261,8 @@ RULE will typically be a single string or character."
 (defrule value (or single-value object (and open-squarevalue-list close-square)))
 
 ;; file information
-(defrule file-extension-decl (and "file_extension" whitespace+ string-constant semi))
-(defrule file-identifier-decl (and "file_identifier" whitespace+ string-constant semi))
+(defrule file-extension-decl (and file-extension string-constant semi))
+(defrule file-identifier-decl (and file-identifier string-constant semi))
 
 
 ;;; ---------- Top-level parser function ----------
