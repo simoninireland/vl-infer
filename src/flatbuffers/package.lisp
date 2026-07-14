@@ -35,16 +35,19 @@
 		#:whitespace+)
 
   (:export
+   ;; base types
+   #:bool
+   #:byte #:ubyte #:int8 #:uint8
+   #:short #:ushort #:int16 #:uint16
+   #:int #:uint #:int32 #:uint32
+   #:long #:ulong #:int64 #:uint64
+   #:float #:float32
+   #:double #:float64
+
    ;; structure base classes
    #:Table
    #:Structure
    #:Enumeration
 
-   ;; builder
-   #:Builder
-   #:buffer
-   #:offset
-
    ;; schema parser
-   #:parse-fbs-schema
-   ))
+   #:parse-fbs-schema))
