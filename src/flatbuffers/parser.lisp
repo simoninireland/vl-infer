@@ -46,11 +46,10 @@ RULE will typically be a single string or character."
 (defmacro defsymbol (name rule)
   "Define a simple token NAME that returns NAME as a symbol.
 
-RULE will typically be a single string or character."
+RULE will usually be a single string or character."
   `(deftoken ,name
        (and whitespace* ,rule whitespace*)
-     (:lambda (l)
-       (intern (upcase (text l))))))
+     (:constant ',name)))
 
 
 (defmacro deflistrule (name rule &body options)
@@ -169,14 +168,16 @@ RULE will typically be a single string or character."
 
 
 ;; types
-(defsymbol simple-type (or "bool"
-			   "byte" "ubyte" "int8" "uint8"
-			   "short" "ushort" "int16" "uint16"
-			   "int" "uint" "int32" "uint32"
-			   "long" "ulong" "int64" "unit64"
-			   "float" "float32"
-			   "double" "float64"
-			   "string"))
+(defrule simple-type (or "bool"
+			 "byte" "ubyte" "int8" "uint8"
+			 "short" "ushort" "int16" "uint16"
+			 "int" "uint" "int32" "uint32"
+			 "long" "ulong" "int64" "unit64"
+			 "float" "float32"
+			 "double" "float64"
+			 "string")
+  (:lambda (l)
+    (intern (upcase (text l)))))
 (deftoken complex-type (or (and open-square type close-square)
 			   ident))
 
@@ -206,7 +207,13 @@ RULE will typically be a single string or character."
 
 
 ;; namespace and attributes
-(defrule namespace-decl (and namespace identifier (* (and dot identifier)) semi))
+(defrule namespace-decl (and namespace identifier (* (and dot identifier)) semi)
+  (:destructure (nst ns1 nss w1)
+		(declare (ignore w1))
+		(let ((ns (if (null nss)
+			      ns1
+			      (cons ns1 (mapcar #'cadr nss)))))
+		  `(,nst ,ns))))
 (defrule attribute-decl (and attribute (or ident (and quotes ident quotes)) semi))
 
 
@@ -291,4 +298,21 @@ FBS can be a pathname, a stream, or a string."
 	   (error "Can't parse schema from object ~a" fbs)))
 
     ;; parse the schema
-    (denil (parse 'schema buf))))
+    (car (denil (parse 'schema buf)))))
+
+
+(defun fbs-root-type (schema)
+  "Extract the root object type of SCHEMA.
+
+This will be either a type name declared by the root_type element of
+the schema grammar, or the first table declared."
+  (if-let ((rt (assoc 'root-type schema)))
+    ;; explicit root_type declared
+    (cadr rt)
+
+    ;; extract the first table
+    (if-let ((t1 (assoc 'table schema :key #'car)))
+      (safe-cadr t1)
+
+      ;; no tables
+      (error "No tables defined in schema"))))
