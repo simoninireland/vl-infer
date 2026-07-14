@@ -35,7 +35,7 @@
 ;;; once it's been read. This might be an issue with large buffers.
 
 
-;;; ---------- Binary formats ----------
+;;; ---------- Schema elements ----------
 
 (defvar *expecting* nil
   "A stack of object types being read.")
@@ -68,7 +68,7 @@ This will be NIL the first time the vtable is encountered."
    (fields
     :initarg :fields
     :reader fields
-    :documentation "The fields in canonical order.")))
+    :documentation "A list of (field offset) lists in canonical order.")))
 
 
 (defclass Field ()
@@ -86,6 +86,21 @@ This will be NIL the first time the vtable is encountered."
     :initform nil
     :reader deprecated-p
     :documentation "Flag for deprecation.")))
+
+
+(defclass Enumeration ()
+  ((name
+    :initarg :name
+    :reader name
+    :documentation "The name of the type.")
+   (lisp-binary-type
+    :initarg :type
+    :reader lisp-binary-type
+    :documentation "The LISP-BINARY type used to represent the enumeration.")
+   (fields
+    :initarg :fields
+    :reader fields
+    :documentation "A list of (field value) lists in canonical order.")))
 
 
 (defun create-lisp-binary-struct-fields (type offsets)
@@ -182,6 +197,8 @@ Rweturn a list of binary structure field definitions."
     (setf (lisp-binary-type type) lisp-binary-type)))
 
 
+;;; ---------- Binary format ----------
+
 (defbinary fb-header (:byte-order :little-endian)
   (root-object nil :type (pointer :pointer-type (unsigned-byte 32)
 				  :data-type fb-table-header)))
@@ -234,3 +251,97 @@ Rweturn a list of binary structure field definitions."
 
 (defbinary fb-string (:byte-order :little-endian)
   (str "" :type (counted-string 4)))
+
+
+;;; ---------- Builder functions ----------
+
+(defun flatbuffer-type-offset (ty)
+  "Return the number of bytes reqired for flatbuffer type TY.
+
+This is used as the offset into the flatbuffer structure."
+  (case ty
+    (bool 1)
+    ((byte ubyte int8 uint8) 1)
+    ((short ushort int16 uint16) 2)
+    ((int uint int32 uint32) 4)
+    ((long ulong int64 uint64) 8)
+    ((float float32) 4)
+    ((double float64) 8)
+    (string 4)
+
+    ;; anything else is an offset within the file to a table
+    (t 4)))
+
+
+;;TODO: Move to utils
+
+(defun safe-cadr (l)
+  "Return the CADR of L if possible, otherwise NIL."
+  (when (and (listp l)
+	     (>= (length l) 2))
+    (cadr l)))
+
+
+(defun create-object (object)
+  "Create the code for a schema OBJECT."
+  (declare (optimize debug))
+
+  (destructuring-bind (tag &rest args)
+      object
+
+    (case tag
+      (enum
+       (destructuring-bind (name ty vars)
+	   args
+
+	 (let ((fields (foldr (lambda (fields-val f)
+				(declare (optimize debug))
+
+				(destructuring-bind (field-name &rest vars)
+				    f
+				  (destructuring-bind (fields val)
+				      fields-val
+				    (let ((v (or (safe-cadr (assoc :default vars))
+						 val)))
+
+				      (list (append fields (list (list field-name v)))
+					    (1+ v))))))
+			      vars (list '() 0))))
+
+	   (make-instance 'Enumeration :name name :type ty :fields (car fields)))))
+
+      (table
+       (destructuring-bind (name vars)
+	   args
+
+	 (let ((fields (foldr (lambda (fields-offset f)
+				(destructuring-bind (field-name &rest vars)
+				    f
+				  (let* ((ty (safe-cadr (assoc :type vars)))
+					 (width (flatbuffer-type-offset ty)))
+				    (destructuring-bind (fields offset)
+					fields-offset
+
+				      (list (append fields (list (list field-name offset)))
+					    (+ offset width))))))
+			      vars (list '() 0))))
+
+	   (make-instance 'Table :name name :fields (car fields)))))
+
+      (t
+       ;; warn for now
+       (warn "No object constructed for ~s" tab)))))
+
+
+(defun create-schema (schema)
+  "Create the code for SCHEMA.
+
+SCHEMA should be a, s-expression-format schema definition."
+
+  )
+
+
+
+(defun create-table (args)
+  "Create the code for a table."
+  )

@@ -46,3 +46,24 @@
   "Test we can parse monsters.fbs."
   (with-open-file (str "monsters.fbs" :direction :input)
     (is (fb::parse-fbs-schema str))))
+
+
+;;; ---------- Creating objects ----------
+
+(test test-flatbuffers-create-table
+  "Test we can create a simple table."
+  (let* ((object '(fb::table testtable ((first (type fb::short)))))
+	 (table (fb::create-object object)))
+
+    (is (eql (fb::name table) 'testtable))
+    (is (equal (fb::fields table) '((first 0))))))
+
+
+(test test-flatbuffers-create-enum
+  "Test we can create an enumeration."
+  (let* ((object '(fb::enum testenum byte ((first) (second (:default 6)) (third))))
+	 (enum (fb::create-object object)))
+
+    (is (eql (fb::name enum) 'testenum))
+    (is (eql (fb::lisp-binary-type enum) 'fb::byte))
+    (is (equal (fb::fields enum) '((first 0) (second 6) (third 7))))))
