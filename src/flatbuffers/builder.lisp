@@ -41,46 +41,50 @@
   "A stack of object types being read.")
 
 
-(defvar *object-vtable* (make-hash-table)
-  "A hash table from vtable offsets to type names.")
+(defvar *object-type-vtable* (make-hash-table)
+  "A hash table from vtable offsets to types.")
 
 
-(defun object-for-vtable (offset)
+(defun object-type-for-offset (offset)
   "Return the object type associated with the given vtable OFFSET.
 
 This will be NIL the first time the vtable is encountered."
-  (gethash offset *object-vtable* nil))
+  (gethash offset *object-type-vtable* nil))
 
 
-(defclass Table ()
+(defclass Flatbuffers-Object ()
   ((name
     :initarg :name
     :reader name
     :documentation "The name of the type.")
    (lisp-binary-type
+    :initarg :lisp-binary-type
     :initform nil
     :accessor lisp-binary-type
-    :documentation "The name of the binary structure used to encode this object type.")
-   (vtable
+    :documentation "The name of the binary structure used to encode this object type."))
+  (:documentation "Base class for all flatbuffers objects.
+
+These onbjects are used to describe structures present in flatbuffers
+and their schemata."))
+
+
+(defclass Table (Flatbuffers-Object)
+  ((vtable
     :initform nil
     :accessor vtable
     :documentation "The object type's vtable structure.")
    (fields
     :initarg :fields
     :reader fields
-    :documentation "A list of (field offset) lists in canonical order.")))
+    :documentation "A list of fields in canonical order.")))
 
 
-(defclass Field ()
-  ((name
-    :initform (gensym)
-    :initarg :name
-    :reader name
-    :documentation "The field name.")
-   (lisp-binary-type
-    :initarg :lisp-binary-type
-    :reader lisp-binary-type
-    :documentation "The LISP-BINARY type for this field.")
+(defclass Field (Flatbuffers-Object)
+  ((value
+    :initarg :value
+    :initform nil
+    :reader value
+    :documentation "The default value for this field.")
    (deprecated-p
     :initarg :deprecated
     :initform nil
@@ -88,16 +92,8 @@ This will be NIL the first time the vtable is encountered."
     :documentation "Flag for deprecation.")))
 
 
-(defclass Enumeration ()
-  ((name
-    :initarg :name
-    :reader name
-    :documentation "The name of the type.")
-   (lisp-binary-type
-    :initarg :type
-    :reader lisp-binary-type
-    :documentation "The LISP-BINARY type used to represent the enumeration.")
-   (fields
+(defclass Enumeration (Flatbuffers-Object)
+  ((fields
     :initarg :fields
     :reader fields
     :documentation "A list of (field value) lists in canonical order.")))
@@ -163,8 +159,8 @@ Rweturn a list of binary structure field definitions."
 		       (t
 			(appendf fields
 				 (list `(,(name field) nil :type (eval (progn
-									 (push (lisp-binary-type field) *expecting*)
-									 ,(lisp-binary-type field))))))
+									 (push ',type *expecting*)
+									 ,type)))))
 			(incf offset 4)))
 
 		     (append struct fields))))))
@@ -181,17 +177,33 @@ Rweturn a list of binary structure field definitions."
 	  (foldr #'create-field fields-offsets nil))))))
 
 
+(defun create-lisp-binary-struct (type lisp-binary-type offsets)
+  "Create the code for the binary structure representing TYPE with OFFSETS.
+
+LISP-BINARY-TYPE should be the symbol naming the binmary structure created."
+  (declare (optimize debug))
+
+  (let* ((fields (create-lisp-binary-struct-fields type offsets)))
+
+    `(defbinary ,lisp-binary-type (:byte-order :little-endian)
+       ,@fields)))
+
+
 (defun make-lisp-binary-struct (type offsets)
   "Create the body structure for TYPE at the given OFFSETS."
   (declare (optimize debug))
 
-  (let* ((fields (create-lisp-binary-struct-fields type offsets))
-	 (lisp-binary-type (intern (upcase (concat "fb-table-fields-" (symbol-name (name type))))))
-	 (struct-code `(defbinary ,lisp-binary-type (:byte-order :little-endian)
-			 ,@fields)))
-    (break)
+  (let* ((lisp-binary-type (intern (upcase (concat "fb-table-field-" (symbol-name (name type))))))
+	 (struct-code (create-lisp-binary-struct type lisp-binary-type offsets)))
+
     ;; build the structure
-    (eval struct-code)
+    ;; We mask SIMPLE-ERROR conditions because they're signalled when a
+    ;; struct is re-defined (in SBCL, anyway) and we want to be able to
+    ;; do so.
+    (eval `(handler-case
+	       ,struct-code
+	     (simple-error (e)
+	       (continue e))))
 
     ;; record its name for later reference
     (setf (lisp-binary-type type) lisp-binary-type)))
@@ -213,7 +225,7 @@ Rweturn a list of binary structure field definitions."
 				    (let ((object-type (car *expecting*)))
 				      (make-lisp-binary-struct object-type field-offsets)
 				      (values 1 0)))
-			  :lisp-type (unsigned-byte 16))))
+				:lisp-type (unsigned-byte 16))))
 
 
 (defbinary fb-table-header (:byte-order :little-endian)
@@ -223,11 +235,11 @@ Rweturn a list of binary structure field definitions."
 					     (soffset (read-integer 4 str :signed t))
 					     (there (- here soffset))
 					     (after (file-position str))
-					     (object (object-for-vtable there))
-					     (vtable (if object
+					     (cl (object-type-for-offset there))
+					     (vtable (if cl
 							 ;; we've seen this object type before,
 							 ;; return its vtable struct
-							 (vtable object)
+							 (vtable cl)
 
 							 ;; we haven't seen this object type before
 							 (progn
@@ -238,8 +250,8 @@ Rweturn a list of binary structure field definitions."
 							   (file-position str after)
 
 							   ;; add it to the table
-							   (let ((object (car *expecting*)))
-							     (setf (vtable object) vtable))
+							   (let ((cl (car *expecting*)))
+							     (setf (vtable cl) vtable))
 
 							   vtable))))
 
@@ -255,11 +267,34 @@ Rweturn a list of binary structure field definitions."
 
 ;;; ---------- Builder functions ----------
 
-(defun flatbuffer-type-offset (ty)
+(defun fb-to-lisp-binary-type (ty)
+  "Return the LISP-BINARY type used to represent data of flatbuffers type TY."
+  (declare (optimize debug))
+
+   (case ty
+    ;; base types
+    (bool 'bit)
+    ((byte ubyte int8 uint8) '(unsigned-byte 8))
+    ((short ushort int16 uint16) '(unsigned-byte 16))
+    ((int uint int32 uint32) '(unsigned-byte 32))
+    ((long ulong int64 uint64) '(unsigned-byte 64))
+    ((float float32) 'single-float)
+    ((double float64) 'double-float)
+    (string 'fb-string)
+
+    ;; union, object, and structure types
+    (t
+     ty)))
+
+
+(defun fb-type-offset (ty)
   "Return the number of bytes reqired for flatbuffer type TY.
 
 This is used as the offset into the flatbuffer structure."
+  (declare (optimize debug))
+
   (case ty
+    ;; base types
     (bool 1)
     ((byte ubyte int8 uint8) 1)
     ((short ushort int16 uint16) 2)
@@ -269,8 +304,12 @@ This is used as the offset into the flatbuffer structure."
     ((double float64) 8)
     (string 4)
 
-    ;; anything else is an offset within the file to a table
-    (t 4)))
+    ;; union, object, and structure types
+    (t
+     (if (flatbuffers-object-p ty)
+	 4
+
+	 (error "Unrecognised flatbuffers type ~s" ty)))))
 
 
 ;;TODO: Move to utils
@@ -282,66 +321,128 @@ This is used as the offset into the flatbuffer structure."
     (cadr l)))
 
 
+(defun getassoc (item alist &key default)
+  "Return the value associated to ITEM in ALIST.
+
+DEFAULT will be returned if no association exists, and itself defaults
+to NIL."
+  (if-let ((a (assoc item alist)))
+    (safe-cadr a)
+    default))
+
+
 (defun create-object (object)
   "Create the code for a schema OBJECT."
   (declare (optimize debug))
 
   (destructuring-bind (tag &rest args)
       object
+    (let (root-object)
 
-    (case tag
-      (enum
-       (destructuring-bind (name ty vars)
-	   args
+      (case tag
+	(enum
+	 (destructuring-bind (name ty vars)
+	     args
 
-	 (let ((fields (foldr (lambda (fields-val f)
-				(declare (optimize debug))
+	   (let* ((lisp-binary-type (fb-to-lisp-binary-type ty))
+		  (fields (car (foldr (lambda (fields-val f)
+					(destructuring-bind (field-name &rest vars)
+					    f
+					  (destructuring-bind (fields val)
+					      fields-val
+					    (let ((v (or (getassoc :default vars)
+							 val)))
+					      (list (append fields
+							    (list (make-instance 'Field :name field-name
+											:lisp-binary-type lisp-binary-type
+											:value v)))
+						    (1+ v))))))
+				      vars (list '() 0)))))
 
-				(destructuring-bind (field-name &rest vars)
-				    f
-				  (destructuring-bind (fields val)
-				      fields-val
-				    (let ((v (or (safe-cadr (assoc :default vars))
-						 val)))
+	     `(defclass ,name (Enumeration)
+		()
+		(:default-initargs :name ',name
+				   :lisp-binary-type ',lisp-binary-type
+				   :fields ',fields)))))
 
-				      (list (append fields (list (list field-name v)))
-					    (1+ v))))))
-			      vars (list '() 0))))
+	(table
+	 (destructuring-bind (name vars)
+	     args
 
-	   (make-instance 'Enumeration :name name :type ty :fields (car fields)))))
+	   (let ((fields (foldr (lambda (fields f)
+				  (destructuring-bind (field-name &rest vars)
+				      f
+				    (let* ((fb-ty (getassoc :type vars))
+					   (lisp-binary-type (fb-to-lisp-binary-type fb-ty)))
+				      (append fields
+					      (list (make-instance 'Field :name field-name
+									  :lisp-binary-type lisp-binary-type))))))
+				vars '())))
 
-      (table
-       (destructuring-bind (name vars)
-	   args
+	     `(defclass ,name (Table)
+		()
+		(:default-initargs  :name ',name
+				    :fields ',fields)))))
 
-	 (let ((fields (foldr (lambda (fields-offset f)
-				(destructuring-bind (field-name &rest vars)
-				    f
-				  (let* ((ty (safe-cadr (assoc :type vars)))
-					 (width (flatbuffer-type-offset ty)))
-				    (destructuring-bind (fields offset)
-					fields-offset
+	(root-type
+	 nil)
 
-				      (list (append fields (list (list field-name offset)))
-					    (+ offset width))))))
-			      vars (list '() 0))))
-
-	   (make-instance 'Table :name name :fields (car fields)))))
-
-      (t
-       ;; warn for now
-       (warn "No object constructed for ~s" tab)))))
+	(t
+	 ;; warn for now
+	 (warn "No object constructed for ~s" tag))))))
 
 
 (defun create-schema (schema)
   "Create the code for SCHEMA.
 
-SCHEMA should be a, s-expression-format schema definition."
+SCHEMA should be an S-expression-format schema definition, for example
+as returned by PARSE-FBS-SCHEMA. The code returned will define the
+supporting types and return the root type of the schema, which will be
+a TABLE object."
+  (declare (optimize debug))
 
-  )
+  (let* ((objects-code (remove-if #'null (mapcar #'create-object schema)))
+	 (root-type (fbs-root-type schema)))
+
+    `(progn
+       ,@objects-code)))
 
 
+(defun make-schema (schema)
+  "Make the supporting structures for SCHEMA.
 
-(defun create-table (args)
-  "Create the code for a table."
-  )
+Return the class of the root type."
+  (let ((schema-code (create-schema schema))
+	(root-type (fbs-root-type schema)))
+
+    ;; create the necessary classes
+    (eval schema-code)
+
+    ;; return the class of the root type
+    (find-class root-type)))
+
+
+(defun read-fbs (fb root-type)
+  "Parse a flatbuffers file starting with ROOT-TYPE.
+
+FBS can be a pathname, a stream, or a string."
+  (let (str)
+    (cond ((pathnamep fb)
+	   ;; pathname, read from a file
+	   (setq str (open fb :direction :input :element-type '(unsigned-byte 8))))
+
+	  ((streamp fb)
+	   ;; stream, read from it
+	   (setq str fb))
+
+	  ((stringp fb)
+	   ;; string, use literally
+	   (setq str (make-string-input-stream fb)))
+
+	  (t
+	   (error "Can't parse flatbuffer from ~a" fb)))
+
+    ;; read and parse the stream
+    (let ((*expecting* (list (make-instance root-type)))
+	  (*object-type-vtable* (make-hash-table)))
+      (read-binary 'fb-header str))))

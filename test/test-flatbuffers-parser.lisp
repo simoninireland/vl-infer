@@ -48,22 +48,100 @@
     (is (fb::parse-fbs-schema str))))
 
 
+(test test-flatbuffers-parse-root-type
+  "Test we can extract the root type."
+  (let ((schema (fb::parse-fbs-schema #P"eclectic.fbs")))
+    (is (eql (fb::fbs-root-type schema) 'foobar))))
+
+
+(test test-flatbuffers-root-type-table
+  "Test we get a table as the root type when we compile the schema."
+  (let* ((schema (fb::parse-fbs-schema #P"eclectic.fbs"))
+	 (root-type (fb::make-schema schema)))
+    (is (eql (fb::name (make-instance root-type)) 'foobar))))
+
+
+(test test-flatbuffers-make-schema
+  "Test we can parse and construct the supporting code for a schema."
+  (let* ((schema (fb::parse-fbs-schema #P"eclectic.fbs")))
+    ;; this only checks that the schema compiles, not that it's correct
+    (is (fb::make-schema schema))))
+
+
+(test test-flatbuffers-deprecated-fields
+  "Test we don' include offsets for deprecated fields."
+  )
+
+
 ;;; ---------- Creating objects ----------
+
+(defun make-object (object)
+  "Make the OBJECT."
+  (let ((object-code (fb::create-object object)))
+    (eval object-code)))
+
 
 (test test-flatbuffers-create-table
   "Test we can create a simple table."
-  (let* ((object '(fb::table testtable ((first (type fb::short)))))
-	 (table (fb::create-object object)))
+  (let ((cl-code '(fb::table testtable ((first (:type fb::short))))))
+    (make-object cl-code)
 
-    (is (eql (fb::name table) 'testtable))
-    (is (equal (fb::fields table) '((first 0))))))
+    (let ((table (make-instance 'testtable)))
+      (is (eql (fb::name table) 'testtable))
+      (is (= (length (fb::fields table)) 1 ))
+      (let ((f (car (fb::fields table))))
+	(is (eql (fb::name f) 'first))
+	(is (equal (fb::lisp-binary-type f) '(unsigned-byte 16)))))))
 
 
 (test test-flatbuffers-create-enum
   "Test we can create an enumeration."
-  (let* ((object '(fb::enum testenum byte ((first) (second (:default 6)) (third))))
-	 (enum (fb::create-object object)))
+  (let* ((cl-code'(fb::enum testenum byte ((first) (second (:default 6)) (third)))))
+    (make-object cl-code)
+    (let ((enum (make-instance 'testenum)))
+      (is (eql (fb::name enum) 'testenum))
+      (is (equal (fb::lisp-binary-type enum) '(unsigned-byte 8)))
+      (is (= (length (fb::fields enum)) 3))
+      (let ((fields (fb::fields enum)))
+	(is (equal (mapcar #'fb::name fields) '(first second third)))
+	(is (= (fb::value (car fields)) 0))
+	(is (= (fb::value (cadr fields)) 6))
+	(is (= (fb::value (cadDr fields)) 7))))))
 
-    (is (eql (fb::name enum) 'testenum))
-    (is (eql (fb::lisp-binary-type enum) 'fb::byte))
-    (is (equal (fb::fields enum) '((first 0) (second 6) (third 7))))))
+
+;;; ---------- Reading flatbuffers ----------
+
+(test test-flatbuffers-binary-example-1
+  "Test we can read an eclectic buffer using the LISP-BINARY functionality."
+  (with-open-file (str #P"eclectic-example.fb" :direction :input :element-type '(unsigned-byte 8))
+    (let* ((fields (list (make-instance 'fb::Field :name 'meal
+						   :lisp-binary-type '(unsigned-byte 8))
+			 (make-instance 'fb::Field :name 'density
+						   :lisp-binary-type '(unsigned-byte 64)
+						   :deprecated t)
+			 (make-instance 'fb::Field :name 'say
+						   :lisp-binary-type 'string)
+			 (make-instance 'fb::Field :name 'height
+						   :lisp-binary-type '(unsigned-byte 16)))))
+      (defclass FooBar (fb::Table)
+	()
+	(:default-initargs :name 'FooBar :fields fields))
+
+      (setf fb::*expecting* (list (make-instance 'FooBar))) ; root type
+
+      (let ((fb (lisp-binary:read-binary 'fb::fb-header str)))
+	(is (= (fb-table-field-foobar-height (fb::fb-table-header-body (fb::fb-header-root-object fb))) 100))
+
+	(is (equal (fb::fb-string-str (fb-table-field-foobar-say (fb::fb-table-header-body (fb::fb-header-root-object fb)))) "Fi fi fo fum!"))))))
+
+
+(test test-flatbuffers-read-eclectic
+  "Test we can read an eclectic buffer by parsing the schema."
+  (let* ((schema (fb::parse-fbs-schema #P"eclectic.fbs"))
+	 (root-type (fb::make-schema schema)))
+
+    (with-open-file (str #P"eclectic-example.fb" :direction :input :element-type '(unsigned-byte 8))
+      (let ((fb (fb::read-fbs str root-type)))
+	(is (= (fb-table-field-foobar-height (fb::fb-table-header-body (fb::fb-header-root-object fb))) 100))
+
+	(is (equal (fb::fb-string-str (fb-table-field-foobar-say (fb::fb-table-header-body (fb::fb-header-root-object fb)))) "Fi fi fo fum!"))))))
