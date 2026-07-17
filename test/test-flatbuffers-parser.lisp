@@ -68,11 +68,6 @@
     (is (fb::make-schema schema))))
 
 
-(test test-flatbuffers-deprecated-fields
-  "Test we don' include offsets for deprecated fields."
-  )
-
-
 ;;; ---------- Creating objects ----------
 
 (defun make-object (object)
@@ -145,3 +140,15 @@
 	(is (= (fb-table-field-foobar-height (fb::fb-table-header-body (fb::fb-header-root-object fb))) 100))
 
 	(is (equal (fb::fb-string-str (fb-table-field-foobar-say (fb::fb-table-header-body (fb::fb-header-root-object fb)))) "Fi fi fo fum!"))))))
+
+
+(test test-flatbuffers-read-monsters
+  "Test we can read a monsters buffer from its schema."
+  (let* ((schema (fb::parse-fbs-schema #P"monsters.fbs"))
+	 (root-type (fb::make-schema schema)))
+
+    (with-open-file (str #P"monsters-example.fb" :direction :input :element-type '(unsigned-byte 8))
+      (fb::read-fbs str root-type))
+      )
+
+    )
