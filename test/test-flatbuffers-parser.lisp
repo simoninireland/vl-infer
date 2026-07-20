@@ -58,7 +58,7 @@
   "Test we get a table as the root type when we compile the schema."
   (let* ((schema (fb::parse-fbs-schema #P"eclectic.fbs"))
 	 (root-type (fb::make-schema schema)))
-    (is (eql (fb::name (make-instance root-type)) 'foobar))))
+    (is (eql (fb::name root-type) 'foobar))))
 
 
 (test test-flatbuffers-make-schema
@@ -72,36 +72,40 @@
 
 (defun make-object (object)
   "Make the OBJECT."
-  (let ((object-code (fb::create-object object)))
-    (eval object-code)))
+  (let ((object-code (fb::create-object nil object)))
+    (eval (car object-code))))
 
 
 (test test-flatbuffers-create-table
   "Test we can create a simple table."
-  (let ((cl-code '(fb::table testtable ((first (:type fb::short))))))
-    (make-object cl-code)
+  (let ((*object-types* (make-hash-table))
+	(*object-type-vtable* (make-hash-table)))
+    (let ((cl-code '(fb::table testtable ((first (:type fb::short))))))
+      (make-object cl-code)
 
-    (let ((table (make-instance 'testtable)))
-      (is (eql (fb::name table) 'testtable))
-      (is (= (length (fb::fields table)) 1 ))
-      (let ((f (car (fb::fields table))))
-	(is (eql (fb::name f) 'first))
-	(is (equal (fb::lisp-binary-type f) '(unsigned-byte 16)))))))
+      (let ((table (fb::object-type 'testtable)))
+	(is (eql (fb::name table) 'testtable))
+	(is (= (length (fb::fields table)) 1 ))
+	(let ((f (car (fb::fields table))))
+	  (is (eql (fb::name f) 'first))
+	  (is (equal (fb::lisp-binary-type f) '(unsigned-byte 16))))))))
 
 
 (test test-flatbuffers-create-enum
   "Test we can create an enumeration."
-  (let* ((cl-code'(fb::enum testenum byte ((first) (second (:default 6)) (third)))))
-    (make-object cl-code)
-    (let ((enum (make-instance 'testenum)))
-      (is (eql (fb::name enum) 'testenum))
-      (is (equal (fb::lisp-binary-type enum) '(unsigned-byte 8)))
-      (is (= (length (fb::fields enum)) 3))
-      (let ((fields (fb::fields enum)))
-	(is (equal (mapcar #'fb::name fields) '(first second third)))
-	(is (= (fb::value (car fields)) 0))
-	(is (= (fb::value (cadr fields)) 6))
-	(is (= (fb::value (cadDr fields)) 7))))))
+  (let ((*object-types* (make-hash-table))
+	(*object-type-vtable* (make-hash-table)))
+    (let* ((cl-code'(fb::enum testenum byte ((first) (second (:default 6)) (third)))))
+      (make-object cl-code)
+      (let ((enum (fb::object-type 'testenum)))
+	(is (eql (fb::name enum) 'testenum))
+	(is (equal (fb::lisp-binary-type enum) '(unsigned-byte 8)))
+	(is (= (length (fb::fields enum)) 3))
+	(let ((fields (fb::fields enum)))
+	  (is (equal (mapcar #'fb::name fields) '(first second third)))
+	  (is (= (fb::value (car fields)) 0))
+	  (is (= (fb::value (cadr fields)) 6))
+	  (is (= (fb::value (cadDr fields)) 7)))))))
 
 
 ;;; ---------- Reading flatbuffers ----------
@@ -115,7 +119,7 @@
 						   :lisp-binary-type '(unsigned-byte 64)
 						   :deprecated t)
 			 (make-instance 'fb::Field :name 'say
-						   :lisp-binary-type 'string)
+						   :lisp-binary-type 'fb::fb-string)
 			 (make-instance 'fb::Field :name 'height
 						   :lisp-binary-type '(unsigned-byte 16)))))
       (defclass FooBar (fb::Table)
@@ -149,6 +153,7 @@
 
     (with-open-file (str #P"monsters-example.fb" :direction :input :element-type '(unsigned-byte 8))
       (fb::read-fbs str root-type))
+
       )
 
     )

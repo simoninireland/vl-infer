@@ -25,47 +25,26 @@
 
 ;;; ---------- Helper macros ----------
 
-(defmacro deftoken (name rule &body options)
-  "Declare a optionally whitespace-delimited token NAME.
+(defrule skippable
+    parser.common-rules:whitespace+)
 
-Add explicit whitespace parsesrs where needed."
-  `(defrule ,name
-       (and whitespace* ,rule whitespace*)
-     ,@options))
+(defrule skippable?
+    parser.common-rules:whitespace*)
 
-
-(defmacro deftoken* (name rule)
-  "Define a simple token NAME that always returns NIL.
-
-RULE will typically be a single string or character."
-  `(deftoken ,name
+(defmacro deftoken (name rule)
+  "Define a token NAME using RULE returning NAME as a token."
+  `(defrule/s ,name
        ,rule
-     (:constant nil)))
-
-
-(defmacro defsymbol (name rule)
-  "Define a simple token NAME that returns NAME as a symbol.
-
-RULE will usually be a single string or character."
-  `(deftoken ,name
-       (and whitespace* ,rule whitespace*)
      (:constant ',name)))
-
-
-(defmacro deflistrule (name rule &body options)
-  "Define a rule NAME that matches a comma-separated list of RULE."
-  `(defrule ,name
-       (and ,rule (? (and comma ,rule)))
-     ,@options))
 
 
 ;;; ---------- Characters ----------
 
-(defrule point #\.)
-(defrule sign (or #\+ #\-))
-(defrule exp (or #\E #\e))
-(defrule power (or #\P #\p))
-(defrule hex (and "0" (or #\X #\x)))
+(defrule POINT #\.)
+(defrule SIGN (or #\+ #\-))
+(defrule EXP (or #\E #\e))
+(defrule POWER (or #\P #\p))
+(defrule HEX (and "0" (or #\X #\x)))
 
 (defrule digit (character-ranges (#\0 #\9)))
 (defrule xdigit (character-ranges (#\0 #\9) (#\A #\F) (#\a #\f)))
@@ -74,202 +53,225 @@ RULE will usually be a single string or character."
 ;;; ---------- Tokens ----------
 
 ;; delimiters
-(deftoken* semi ";")
-(deftoken* comma ",")
-(deftoken* colon ":")
-(deftoken* dot ".")
-(deftoken* quotes "\"")
-(deftoken* equals-sign "=")
-(deftoken* open-curly "{")
-(deftoken* close-curly "}")
-(deftoken* open-square "[")
-(deftoken* close-square "]")
-(deftoken* open-round "(")
-(deftoken* close-round ")")
+(deftoken SEMI ";")
+(deftoken COMMA ",")
+(deftoken COLON ":")
+(deftoken DOT ".")
+(deftoken QUOTES "\"")
+(deftoken EQUALS-SIGN "=")
+(deftoken OPEN-CURLY "{")
+(deftoken CLOSE-CURLY "}")
+(deftoken OPEN-SQUARE "[")
+(deftoken CLOSE-SQUARE "]")
+(deftoken OPEN-ROUND "(")
+(deftoken CLOSE-ROUND ")")
 
 ;; keywords
-(defsymbol include "include")
-(defsymbol attribute "attribute")
-(defsymbol namespace "namespace")
-(defsymbol table "table")
-(defsymbol struct "struct")
-(defsymbol enum "enum")
-(defsymbol union "union")
-(defsymbol rpc-service "rpc_service")
-(defsymbol root-type "root_type")
-(defsymbol file-extension "file_extension")
-(defsymbol file-identifier "file_identifier")
+(deftoken INCLUDE "include")
+(deftoken ATTRIBUTE "attribute")
+(deftoken NAMESPACE "namespace")
+(deftoken TABLE "table")
+(deftoken STRUCT "struct")
+(deftoken ENUM "enum")
+(deftoken UNION "union")
+(deftoken RPC-SERVICE "rpc_service")
+(deftoken ROOT-TYPE "root_type")
+(deftoken FILE-EXTENSION "file_extension")
+(deftoken FILE-IDENTIFIER "file_identifier")
+
+;; special constants
+(deftoken NAN "nan")
+(deftoken INF "inf")
+(deftoken INFINITY "infinity")
+(deftoken TRUE "true")
+(deftoken FALSE "false")
 
 
 ;; strings
-(defrule string-constant (and whitespace* quotes (* (not quotes)) quotes whitespace*)
-  (:destructure (w1 q1 s q2 w2)
-		(declare (ignore w1 q1 q2 w2))
+(defrule string-constant (and QUOTES (* (not QUOTES)) QUOTES)
+  (:destructure (q1 s q2)
+		(declare (ignore q1 q2))
 		(text s)))
 
 
 ;; integers
 (defrule dec-integer-constant
-    (and (? sign) (+ digit))
+    (and (? SIGN) (+ digit))
   (:lambda (l)
     (parse-integer (text l) :radix 10)))
 
 (defrule hex-integer-constant
-    (and (? sign) hex (+ xdigit))
+    (and (? SIGN) HEX (+ xdigit))
   (:lambda (l)
     (parse-integer (text l) :radix 16)))
 
-(deftoken integer-constant
+(defrule integer-constant
     (or dec-integer-constant hex-integer-constant))
 
 
 ;; floats
 (defrule dec-float-constant
-    (and (? sign)
-	 (or (and point (+ digit))
-	     (and (+ digit) (? (and point (+ digit)))))
-	 (? (and exp (? sign) (+ digit))))
+    (and (? SIGN)
+	 (or (and POINT (+ digit))
+	     (and (+ digit) (? (and POINT (+ digit)))))
+	 (? (and EXP (? SIGN) (+ digit))))
   (:lambda (l)
     (parse-float (text l) :radix 10 :exponent-character #\E)))
 
 (defrule hex-float-constant
-    (and (? sign)
+    (and (? SIGN)
 	 hex
-	 (or (and point (+ xdigit))
-	     (and (+ xdigit) (? (and point (+ xdigit)))))
-	 (? (and power (? sign) (+ xdigit))))
+	 (or (and POINT (+ xdigit))
+	     (and (+ xdigit) (? (and POINT (+ xdigit)))))
+	 (? (and POWER (? SIGN) (+ xdigit))))
   (:lambda (l)
     (parse-float (text l) :radix 16 :exponent-character #\P)))
 
 (defrule special-float-constant
-    (and (? sign) (or "nan" "inf" "infinity"))
-  (:text t))
+    (and (? SIGN) (or NAN INF INFINITY)))
 
-(deftoken float-constant
+(defrule float-constant
     (or dec-float-constant
 	hex-float-constant
 	special-float-constant))
 
 
 ;; booleans
-(deftoken boolean-constant
-    (or "true" "false"))
+(defrule boolean-constant
+    (or TRUE FALSE))
 
 
 ;; identifiers
-(defrule identifier			; raw form
+(defrule/s ident
     (and (character-ranges (#\a #\z) (#\A #\Z) #\_)
 	 (* (character-ranges (#\a #\z) (#\A #\Z) (#\0 #\9) #\_)))
   (:lambda (l)
     (intern (upcase (text l)))))
 
-(deftoken ident			     ; optionally whitespace-delimited
-    identifier)
-
 
 ;; types
-(defrule simple-type (or "bool"
-			 "byte" "ubyte" "int8" "uint8"
-			 "short" "ushort" "int16" "uint16"
-			 "int" "uint" "int32" "uint32"
-			 "long" "ulong" "int64" "unit64"
-			 "float" "float32"
-			 "double" "float64"
-			 "string")
+(defrule/s simple-type (or "bool"
+			   "byte" "ubyte" "int8" "uint8"
+			   "short" "ushort" "int16" "uint16"
+			   "int" "uint" "int32" "uint32"
+			   "long" "ulong" "int64" "unit64"
+			   "float" "float32"
+			   "double" "float64"
+			   "string")
   (:lambda (l)
     (intern (upcase (text l)))))
-(deftoken complex-type (or (and open-square type close-square)
-			   ident))
+(defrule array-type (and open-square/?s (or simple-type/?s ident/?s) close-square/?s))
+(defrule complex-type (or array-type
+			  ident))
 
-(defrule type (or simple-type complex-type))
+(defrule type (or simple-type/?s complex-type))
 
 
 ;;; ---------- Rules ----------
 
 ;; comments
-(defrule comment (and "//" (* (not #\Newline)))
+(defrule comment (and "//" (* (not #\Newline)) #\Newline)
   (:constant nil))
 
 
 ;; overall schema
-(defrule schema (and whitespace*
-		     (? comment)
-		     whitespace*
-		     (? include)
-		     whitespace*
-		     (* (and (or comment
-				 namespace-decl type-decl enum-decl root-decl
-				 file-extension-decl file-identifier-decl)
-			     whitespace*))))
+(defrule header (and (* (or whitespace+ comment include))))
+(defrule schema (and header
+		     (* (and whitespace*
+			     (or comment
+				 namespace-decl type-decl enum-decl union-decl
+				 root-decl
+				 file-extension-decl file-identifier-decl)))))
 
 ;; inclusions
-(defrule include (and include string-constant semi))
+(defrule include (and include/s string-constant semi))
 
 
 ;; namespace and attributes
-(defrule namespace-decl (and namespace identifier (* (and dot identifier)) semi)
+(defrule namespace-decl (and NAMESPACE/s identifier (* (and dot identifier)) semi/?s)
   (:destructure (nst ns1 nss w1)
 		(declare (ignore w1))
 		(let ((ns (if (null nss)
 			      ns1
 			      (cons ns1 (mapcar #'cadr nss)))))
 		  `(,nst ,ns))))
-(defrule attribute-decl (and attribute (or ident (and quotes ident quotes)) semi))
+(defrule attribute-decl (and attribute/s (or ident (and quotes ident quotes)) semi/?s))
 
 
-;; types
-(defrule root-decl (and root-type ident semi))
-
-(defrule type-decl (and (or table struct) ident metadata open-curly (* field-decl) close-curly))
-(defrule enum-decl (and (or (and enum ident colon type)
-			    (and union ident))
-			metadata
-			open-curly (? (and enumval-decl (* (and comma enumval-decl)))) close-curly)
-  (:destructure (h &rest fields)
-		;; remove the unnecessary nesting caused by the OR rule
-		(append h fields)))
+;; root type
+(defrule root-decl (and root-type/s IDENT/?s semi/?s)
+  (:lambda (l)
+    (list (elt l 0) (elt l 1))))
 
 
-(defrule field-decl (and ident colon type (? (and equals-sign (or scalar ident))) metadata semi)
-  (:destructure (id w1 ty iv meta w4)
-		(declare (ignore w1 w4))
-		`(,id (:type ,ty) ,@(if iv `((:default ,iv))) ,meta)))
-(defrule enumval-decl (and ident (? (and equals-sign integer-constant)) metadata)
-  (:destructure (id expl meta)
-		`(,id ,@(if expl `((:default ,expl))) ,meta)))
+;; tables
+(defrule type-decl (and (or TABLE/s STRUCT/s) IDENT/?s
+			(? metadata)
+			open-curly/?s (* (or field-decl comment)) close-curly/?s)
+  (:lambda (l)
+    (list (elt l 0) (elt l 1) (elt l 2) (elt l 4))))
+
+(defrule field-decl (and ident/?s colon/?s type whitespace* (? (and equals-sign/?s (or scalar ident) whitespace*))
+			 (? metadata) semi/?s)
+  (:destructure (id colon ty w1 iv meta w4)
+		`(,id (:type ,ty)
+		      ,@(if iv `((:default ,(cadr iv))))
+		      ,@(if meta `((:metadata ,meta))))))
+
+
+;; enumerations
+(defrule enum-decl (and ENUM/s ident/?s colon/?s type whitespace*
+			(? metadata)
+			open-curly/?s (? (and enumval-decl (* (and comma/?s enumval-decl)))) close-curly/?s)
+  (:destructure (tag id colon ty w1 meta ocurl fs ccurl)
+		(list tag id ty meta fs)))
+
+(defrule enumval-decl (and ident/?s (? (and equals-sign/?s integer-constant)) whitespace*
+			   (? metadata)
+			   whitespace?)
+  (:destructure (id iv w1 meta w2)
+		`(,id
+		  ,@(if iv
+			`((:default ,(cadr iv))))
+		  ,@(if meta
+			`((:metadata ,(car iv)))))))
+
+
+;; unions
+(defrule union-decl (and UNION/s ident/?s whitespace*
+			 (? metadata)
+			 open-curly/?s (? (and enumval-decl (* (and comma/?s enumval-decl)))) close-curly/?s)
+  (:lambda (l)
+    (list (elt l 0) (elt l 1) (elt l 2) (elt l 3))))
 
 
 ;; metadata
-(deflistrule ident-single-value?-list
-    ident-single-value?)
-(defrule metadata (and whitespace*
-		       (? (and open-round ident-single-value?-list close-round
-			       whitespace*)))
-  (:destructure (w1 m)
-		(declare (ignore w1))
-		(unless (null m)
-		  ;; we have metadata
-		  (cons :metadata m))))
+(defrule metadata (and open-round/?s ident-single-value? close-round/?s)
+  (:lambda (l)
+    (declare (optimize debug))
+
+    (let ((iv (elt l 1)))
+      (if (null (cadr iv))
+	  (list (car iv) t)
+	  iv))))
 
 
 ;; RPC declarations
-(defrule rpc-decl (and rpc-service whitespace+ ident open-round (+ rpc-method) close-round))
-(defrule rpc-method (and ident whitespace? open-round ident close-round whitespace* colon ident metadata semi))
+(defrule rpc-decl (and rpc-service/s ident open-round (+ rpc-method) close-round))
+(defrule rpc-method (and ident/?s open-round/?s ident/?s close-round/?s colon/?s ident/?s metadata semi))
 
 ;; values and assignments
 (defrule scalar (or boolean-constant integer-constant float-constant))
-(defrule ident-value (and ident colon value))
-(defrule ident-single-value (and ident colon single-value))
-(defrule ident-single-value? (and ident (? (and colon single-value))))
-(defrule object (and open-round (? (and ident-value (? (and comma ident-value)))) close-round))
+(defrule ident-value (and ident/?s colon/?s value))
+(defrule ident-single-value (and ident/?s colon/?s single-value))
+(defrule ident-single-value? (and ident/?s (? (and colon/?s single-value))))
+(defrule object (and open-round/?s (? (and ident-value (? (and comma/?s ident-value)))) close-round/?s))
 (defrule single-value (or scalar string-constant))
-(deflistrule value-list
-    value)
-(defrule value (or single-value object (and open-squarevalue-list close-square)))
+(defrule value (or single-value object (and open-square/?s (and value (* (and comma/?s value))) close-square/?s)))
 
 ;; file information
-(defrule file-extension-decl (and file-extension string-constant semi))
-(defrule file-identifier-decl (and file-identifier string-constant semi))
+(defrule file-extension-decl (and file-extension/s string-constant semi))
+(defrule file-identifier-decl (and file-identifier/s string-constant semi))
 
 
 ;;; ---------- Top-level parser function ----------
@@ -297,7 +299,13 @@ FBS can be a pathname, a stream, or a string."
 	  (t
 	   (error "Can't parse schema from object ~a" fbs)))
 
-    ;; parse the schema
+    ;; reset the types and vtables tables
+    ;; These need to be SETQ and not LET because we fill them in
+    ;; during parsing
+    (setq *object-types* (make-hash-table))
+    (setq *object-type-vtable* (make-hash-table))
+
+    ;; parse the schema, deleting the unnecessary structure
     (car (denil (parse 'schema buf)))))
 
 

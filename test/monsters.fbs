@@ -2,14 +2,14 @@
 
 namespace MyGame.Sample;
 
-enum Color:byte { Red = 0, Green, Blue = 6 }
+//enum Color:byte { Red = 0, Green, Blue = 6 }
 
-union Equipment { Weapon } // Optionally add more tables.
+//union Equipment { Weapon } // Optionally add more tables.
 
 struct Vec3 {
-  x:float;
-  y:float;
-  z:float;
+  x:short;
+  y:short;
+  z:short;
 }
 
 table Monster {
@@ -18,16 +18,16 @@ table Monster {
   hp:short = 100;
   name:string;
   friendly:bool = false (deprecated);
-  inventory:[ubyte];
-  color:Color = Blue;
-  weapons:[Weapon];
-  equipped:Equipment;
-  path:[Vec3];
+//  inventory:[ubyte];
+//  color:Color = Blue;
+//  weapons:[Weapon];
+//  equipped:Equipment;
+//  path:[Vec3];
 }
 
-table Weapon {
-  name:string;
-  damage:short;
-}
+//table Weapon {
+//  name:string;
+//  damage:short;
+//}
 
 root_type Monster;

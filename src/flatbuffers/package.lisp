@@ -29,6 +29,7 @@
 		#:upcase
 		#:string-case)
   (:import-from :parser.common-rules
+		#:defrule/s
 		#:whitespace
 		#:whitespace?
 		#:whitespace*
