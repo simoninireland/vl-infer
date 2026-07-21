@@ -20,11 +20,11 @@
 # along with verilisp. If not, see <http://www.gnu.org/licenses/gpl.html>.
 
 import flatbuffers
-import MyGame.Sample.Color
-import MyGame.Sample.Equipment
+#import MyGame.Sample.Color
+#import MyGame.Sample.Equipment
 import MyGame.Sample.Monster
 import MyGame.Sample.Vec3
-import MyGame.Sample.Weapon
+#import MyGame.Sample.Weapon
 
 builder = flatbuffers.Builder(1024)
 

@@ -29,3 +29,10 @@
 (def-suite vl-infer/flatbuffers)  ; flatbuffers handling
 (def-suite vl-infer/tensors)      ; matrices and tensors
 (def-suite vl-infer/ml)           ; inference
+
+(defparameter *this-directory* (pathname-directory #.(or *compile-file-truename* *load-truename*))
+	      "The pathname of this directory.")
+
+(defun load-test-file (fn)
+  "Load file named FN relative to *THIS-DIRECTORY*."
+  (make-pathname :directory *this-directory* :name fn))
