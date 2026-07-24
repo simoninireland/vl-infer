@@ -51,4 +51,9 @@
    #:Enumeration
 
    ;; schema parser
-   #:parse-fbs-schema))
+   #:parse-fbs-schema
+
+   ;; flatbuffers reader
+   #:make-schema
+   #:read-fbs
+   ))
