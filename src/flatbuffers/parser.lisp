@@ -149,6 +149,15 @@
     (intern (upcase (text l)))))
 
 
+;; metadata tags
+;; These are like identifiers but live in the parser's package, not the caller's
+(defrule/s metatag
+    (and (character-ranges (#\a #\z) (#\A #\Z) #\_)
+	 (* (character-ranges (#\a #\z) (#\A #\Z) (#\0 #\9) #\_)))
+  (:lambda (l)
+    (intern (upcase (text l)) :vl-infer/flatbuffers)))
+
+
 ;; types
 (defrule/s simple-type (or "bool"
 			   "byte" "ubyte" "int8" "uint8"
@@ -160,7 +169,9 @@
 			   "string")
   (:lambda (l)
     (intern (upcase (text l)))))
-(defrule array-type (and open-square/?s (or simple-type/?s ident/?s) close-square/?s))
+(defrule array-type (and open-square/?s (or simple-type/?s ident/?s) close-square/?s)
+  (:destructure (os ty cs)
+		`(array ,ty)))
 (defrule complex-type (or array-type
 			  ident))
 
@@ -171,7 +182,7 @@
 
 ;; comments
 (defrule comment (and "//" (* (not #\Newline)) #\Newline)
-  (:constant nil))
+  (:constant nil))q
 
 
 ;; overall schema
@@ -188,7 +199,7 @@
 
 
 ;; namespace and attributes
-(defrule namespace-decl (and NAMESPACE/s identifier (* (and dot identifier)) semi/?s)
+(defrule namespace-decl (and NAMESPACE/s ident (* (and dot ident)) semi/?s)
   (:destructure (nst ns1 nss w1)
 		(declare (ignore w1))
 		(let ((ns (if (null nss)
@@ -204,10 +215,12 @@
     (list (elt l 0) (elt l 1))))
 
 
-;; tables
+;; tables and structs
 (defrule type-decl (and (or TABLE/s STRUCT/s) IDENT/?s
 			(? metadata)
-			open-curly/?s (* (or field-decl comment)) close-curly/?s)
+			open-curly/?s (* (and whitespace*
+					      (or field-decl comment)))
+			close-curly/?s)
   (:lambda (l)
     (list (elt l 0) (elt l 1) (elt l 2) (elt l 4))))
 
@@ -246,7 +259,7 @@
 
 
 ;; metadata
-(defrule metadata (and open-round/?s ident-single-value? close-round/?s)
+(defrule metadata (and open-round/?s metatag-single-value? close-round/?s)
   (:lambda (l)
     (declare (optimize debug))
 
@@ -265,6 +278,7 @@
 (defrule ident-value (and ident/?s colon/?s value))
 (defrule ident-single-value (and ident/?s colon/?s single-value))
 (defrule ident-single-value? (and ident/?s (? (and colon/?s single-value))))
+(defrule metatag-single-value? (and metatag/?s (? (and colon/?s single-value))))
 (defrule object (and open-round/?s (? (and ident-value (? (and comma/?s ident-value)))) close-round/?s))
 (defrule single-value (or scalar string-constant))
 (defrule value (or single-value object (and open-square/?s (and value (* (and comma/?s value))) close-square/?s)))
@@ -280,6 +294,8 @@
   "Parse a .fbs file containing a flatbuffers schema.
 
 FBS can be a pathname, a stream, or a string."
+  (declare (optimize debug))
+
   (let (buf)
     (cond ((pathnamep fbs)
 	   ;; pathname, real from a file
@@ -292,7 +308,7 @@ FBS can be a pathname, a stream, or a string."
 	   (setq buf (make-string (file-length fbs)))
 	   (read-sequence buf fbs))
 
-	  ((stringp fbs)
+	  ((stringp fbs)q
 	   ;; string, use literally
 	   (setq buf fbs))
 
@@ -306,7 +322,8 @@ FBS can be a pathname, a stream, or a string."
     (setq *object-type-vtable* (make-hash-table))
 
     ;; parse the schema, deleting the unnecessary structure
-    (car (denil (parse 'schema buf)))))
+    (let ((schema  (car (denil (parse 'schema buf)))))
+      schema)))
 
 
 (defun fbs-root-type (schema)
