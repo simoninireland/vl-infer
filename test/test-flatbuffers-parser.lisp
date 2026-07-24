@@ -68,60 +68,20 @@
     (is (fb::make-schema schema))))
 
 
-;;; ---------- Creating objects ----------
-
-(defun make-object (object)
-  "Make the OBJECT."
-  (let ((object-code (fb::create-object nil object)))
-    (eval (car object-code))))
-
-
-(test test-flatbuffers-create-table
-  "Test we can create a simple table."
-  (let ((*object-types* (make-hash-table))
-	(*object-type-vtable* (make-hash-table)))
-    (let ((cl-code '(fb::table testtable ((first (:type fb::short))))))
-      (make-object cl-code)
-
-      (let ((table (fb::object-type 'testtable)))
-	(is (eql (fb::name table) 'testtable))
-	(is (= (length (fb::fields table)) 1 ))
-	(let ((f (car (fb::fields table))))
-	  (is (eql (fb::name f) 'first))
-	  (is (equal (fb::lisp-binary-type f) '(unsigned-byte 16))))))))
-
-
-(test test-flatbuffers-create-enum
-  "Test we can create an enumeration."
-  (let ((*object-types* (make-hash-table))
-	(*object-type-vtable* (make-hash-table)))
-    (let* ((cl-code'(fb::enum testenum byte ((first) (second (:default 6)) (third)))))
-      (make-object cl-code)
-      (let ((enum (fb::object-type 'testenum)))
-	(is (eql (fb::name enum) 'testenum))
-	(is (equal (fb::lisp-binary-type enum) '(unsigned-byte 8)))
-	(is (= (length (fb::fields enum)) 3))
-	(let ((fields (fb::fields enum)))
-	  (is (equal (mapcar #'fb::name fields) '(first second third)))
-	  (is (= (fb::value (car fields)) 0))
-	  (is (= (fb::value (cadr fields)) 6))
-	  (is (= (fb::value (cadDr fields)) 7)))))))
-
-
 ;;; ---------- Reading flatbuffers ----------
 
 (test test-flatbuffers-binary-example-1
   "Test we can read an eclectic buffer using the LISP-BINARY functionality."
   (with-open-file (str (load-test-file "eclectic-example.fb") :direction :input :element-type '(unsigned-byte 8))
     (let* ((fields (list (make-instance 'fb::Field :name 'meal
-						   :lisp-binary-type '(unsigned-byte 8))
+						   :representation '(unsigned-byte 8))
 			 (make-instance 'fb::Field :name 'density
-						   :lisp-binary-type '(unsigned-byte 64)
+						   :representation '(unsigned-byte 64)
 						   :deprecated t)
 			 (make-instance 'fb::Field :name 'say
-						   :lisp-binary-type 'fb::fb-string)
+						   :representation 'fb::fb-string)
 			 (make-instance 'fb::Field :name 'height
-						   :lisp-binary-type '(unsigned-byte 16)))))
+						   :representation '(unsigned-byte 16)))))
       (defclass FooBar (fb::Table)
 	()
 	(:default-initargs :name 'FooBar :fields fields))
@@ -152,8 +112,4 @@
 	 (root-type (fb::make-schema schema)))
 
     (with-open-file (str (load-test-file "monsters-example.fb") :direction :input :element-type '(unsigned-byte 8))
-      (fb::read-fbs str root-type))
-
-      )
-
-    )
+      (is (fb::read-fbs str root-type)))))
