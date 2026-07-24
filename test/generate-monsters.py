@@ -49,10 +49,10 @@ name = builder.CreateString("Orc")
 # Create a `vector` representing the inventory of the Orc. Each number
 # could correspond to an item that can be claimed after he is slain.
 # Note: Since we prepend the bytes, this loop iterates in reverse.
-#MyGame.Sample.Monster.StartInventoryVector(builder, 10)
-#for i in reversed(range(0, 10)):
-#  builder.PrependByte(i)
-#inv = builder.EndVector()
+MyGame.Sample.Monster.StartInventoryVector(builder, 10)
+for i in reversed(range(0, 10)):
+  builder.PrependByte(i)
+inv = builder.EndVector()
 
 # Create a FlatBuffer vector and prepend the weapons.
 # Note: Since we prepend the data, prepend them in reverse order.
@@ -62,24 +62,24 @@ name = builder.CreateString("Orc")
 #weapons = builder.EndVector()
 
 # Path as a sequence of positions
-#MyGame.Sample.Monster.StartPathVector(builder, 2)
-#MyGame.Sample.Vec3.CreateVec3(builder, 1.0, 2.0, 3.0)
-#MyGame.Sample.Vec3.CreateVec3(builder, 4.0, 5.0, 6.0)
-#path = builder.EndVector()
+MyGame.Sample.Monster.StartPathVector(builder, 2)
+MyGame.Sample.Vec3.CreateVec3(builder, 1, 2, 3)
+MyGame.Sample.Vec3.CreateVec3(builder, 4, 5, 6)
+path = builder.EndVector()
 
 # Create our monster by using `Monster.Start()` and `Monster.End()`.
 MyGame.Sample.Monster.Start(builder)
 MyGame.Sample.Monster.AddPos(builder,
-                        MyGame.Sample.Vec3.CreateVec3(builder, 1, 2 , 3))
+                             MyGame.Sample.Vec3.CreateVec3(builder, 1, 2, 3))
 MyGame.Sample.Monster.AddMana(builder, 300)
-MyGame.Sample.Monster.AddHp(builder, 300)
+MyGame.Sample.Monster.AddHp(builder, 200)
 MyGame.Sample.Monster.AddName(builder, name)
-#MyGame.Sample.Monster.AddInventory(builder, inv)
+MyGame.Sample.Monster.AddInventory(builder, inv)
 #MyGame.Sample.Monster.AddColor(builder, MyGame.Sample.Color.Color().Red)
 #MyGame.Sample.Monster.AddWeapons(builder, weapons)
 #MyGame.Sample.Monster.AddEquippedType(builder, MyGame.Sample.Equipment.Equipment().Weapon)
 #MyGame.Sample.Monster.AddEquipped(builder, axe)
-#MyGame.Sample.Monster.AddPath(builder, path)
+MyGame.Sample.Monster.AddPath(builder, path)
 orc = MyGame.Sample.Monster.End(builder)
 
 # Call `Finish()` to instruct the builder that this monster is complete.
