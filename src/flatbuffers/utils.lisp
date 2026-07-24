@@ -87,6 +87,41 @@ Return NIL if there is no representation."
 
 ;;; ---------- List utilities ----------
 
+;; Access
+
+(defun safe-car (l)
+  "Return the CAR of L if it is a list, or the atom if it is an atom, or NIL."
+  (if (atom l)
+      l
+      (if (null l)
+	  null
+	  (car l))))
+
+
+(defun safe-cdr (l)
+  "Return the CDR of L is L is a list, or NIL."
+  (when (listp l)
+    (cdr l)))
+
+
+(defun safe-cadr (l)
+  "Return the CADR of L, or NIL if there is none."
+  (when (and (listp l)
+	     (>= (length l) 2))
+    (cadr l)))
+
+
+;; Alist access
+
+(defun getassoc (item alist &key default)
+  "Return the element associated wite ITEM in ALIST-PLIST
+
+If no associated exists return DEFAULT, which itself defaults to NIL."
+  (if-let ((a (assoc item alist)))
+    (safe-cadr a)
+    default))
+
+
 ;; Folds
 
 ;; These are just wrappers around REDUCE, but I find them easier to remember.
@@ -134,6 +169,18 @@ The lists must have equal lengths."
 	(t
 	 (cons (list (car l1) (car l2))
 	       (zip (cdr l1) (cdr l2))))))
+
+
+(defun zip-shortest (l1 l2)
+  "Zip the corresponding elemenmts ofL1 and L2 until one list is exhausted."
+  (cond ((or (null l1)
+	     (null l2))
+	 '())
+
+	(t
+	 (cons (list (car l1) (car l2))
+	       (zip-shortest (cdr l1) (cdr l2))))))
+
 
 (defun zip-without-null (xs ys)
   "Zip lists XS and YS when elements are not null.
