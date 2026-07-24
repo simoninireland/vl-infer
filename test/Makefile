@@ -38,11 +38,11 @@ RM = rm -fr
 tests: $(TEST_FLATBUFFERS)
 
 
-eclectic-example.fb:
+eclectic-example.fb: eclectic.fbs generate-eclectic.py
 	$(FLATC) eclectic.fbs
 	$(PYTHON) generate-eclectic.py
 
-monsters-example.fb:
+monsters-example.fb: monsters.fbs generate-monsters.py
 	$(FLATC) monsters.fbs
 	$(PYTHON) generate-monsters.py
 
