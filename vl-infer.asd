@@ -23,7 +23,7 @@
   :author "Simon Dobson <simoninireland@gmail.com"
   :version (:read-file-form "version.sexp")
   :license "GPL3"
-  :depends-on ("alexandria" "str" "esrap" "parser.common-rules" "parse-float" "lisp-binary")
+  :depends-on ("alexandria" "str" "esrap" "parser.common-rules" "parse-float" "lisp-binary" "log4cl")
   :pathname "src/"
   :serial t
   :components (;; flatbuffers
@@ -31,7 +31,14 @@
 		:components ((:file "package")
 			     (:file "utils")
 			     (:file "builder")
-			     (:file "parser"))))
+			     (:file "parser")))
+
+	       ;; tensors
+	       (:module "tensors"
+		:components ((:file "package")
+			     (:file "conditions")
+			     (:file "interface")
+			     (:file "dense"))))
   :in-order-to ((test-op (test-op "vl-infer/test"))))
 
 
