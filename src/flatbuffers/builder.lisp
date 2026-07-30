@@ -41,6 +41,35 @@
 ;;; issue with large buffers.
 
 
+;;; ---------- Excursions within open streams ----------
+
+;;; Macros for navigating the pointer structure of flatbuffers.
+
+(defmacro with-excursion ((str there) &body body)
+  "Seek STR to THERE, perform BODY, and SEEK back to where we were.
+
+STR should be a variable holding a stream, and will be available in BODY."
+  (with-gensyms (here)
+    `(let ((,here (file-position ,str)))
+       (file-position ,str ,there)
+       (prog1
+	   (progn
+	     ,@body)
+	 (file-position ,str ,here)))))
+
+
+(defmacro with-pointer-excursion ((str) &body body)
+  "Read a pointer from STR and there.
+
+STR should be a variable holding a stream, and will be available in BODY.
+The pointer should be a 32-bit integer based at the current position."
+  (with-gensyms (here ptr)
+    `(let ((,here (file-position ,str))
+	   (,ptr (read-integer 4 ,str)))
+       (with-excursion (,str (+ ,here ,ptr))
+	 ,@body))))
+
+
 ;;; ---------- Flatbuffers to LISP-BINARY type mapping ----------
 
 (defvar *expecting* nil
@@ -49,6 +78,12 @@
 This is elaborated by the LISP-BINARY parser as the flatbuffer is read. The
 top opf the stack holds the LISP-BINARY type description for the expected
 object.")
+
+
+(defmacro with-expecting (cl &body body)
+  "Evaluate BODY in an environment where we're expecting a CL."
+  `(let ((*expecting* (cons ,cl *expecting*)))
+     ,@body))
 
 
 (defvar *fb-type-map* (make-hash-table :test #'equal)
@@ -61,46 +96,16 @@ the schema: every array, table, struct, or enum.")
 (defvar *lisp-binary-type-map* (make-hash-table)
   "Map LISP-BINARY representation type names types to type metaobjects.
 
-There is an entry in this mapping for every constructed type in
-the schema: every array, table, struct, or enum.")
+There is an entry in this mapping for every constructed (non-base)
+type in the schema: every array, table, struct, or enum.")
 
 
-(defvar *vtable-type-map* (make-hash-table)
-  "Map the offset of a vtable to a type metaobject.")
+(defun declare-fb-complex-type (ty)
+  "Declare TY as the metaobject for a complex flatbuffers type.
 
-
-(defun declare-lisp-binary-type (ty)
-  "Add the type metaobject TY to the mappings."
+The type metaobject is mapped to its flatbuffers type and its name."
   (setf (gethash (fb-type ty) *fb-type-map*) ty)
   (setf (gethash (representation ty) *lisp-binary-type-map*) ty))
-
-
-(defun declare-lisp-binary-vtable-offset (ty offset)
-  "Set the offset to the vtable associated with TY."
-  (setf (gethash offset *vtable-type-map*) ty))
-
-
-(defun get-type-metaobject-for-vtable-offset (offset)
-  "Return the type metaobject associated with OFFSET."
-  (gethash offset *vtable-type-map*))
-
-
-(defun lisp-binary-type-metaobject (lbty)
-  "Return the type metaobject corredponding to LBTY."
-  (gethash lbty *lisp-binary-type-map* nil))
-
-
-(defun get-type-metaobject-for-fb-type (fbty)
-  "Return the type metaobjet for the flatbuffers type FBTYPE.
-
-The type needs to be a table."
-  (gethash fbty *fb-type-map*))
-
-
-(defun fb-type-to-lisp-binary-type (fbty)
-  "Return the LISP-BINARY type associated with FBTY."
-  (or (fb-base-type-to-lisp-binary-type fbty)
-      (gethash fbty *fb-type-map* nil)))
 
 
 (defun fb-base-type-to-lisp-binary-type (fbty)
@@ -111,7 +116,7 @@ Return NIL if FBTY isn't a base type."
 
   (case (safe-car fbty)
     ;; base types
-    (bool 'bit)
+    (bool '(unsigned-byte 8))
     ((byte ubyte int8 uint8) '(unsigned-byte 8))
     ((short ushort int16 uint16) '(unsigned-byte 16))
     ((int uint int32 uint32) '(unsigned-byte 32))
@@ -130,48 +135,130 @@ Return NIL if FBTY isn't a base type."
   (not (null (fb-base-type-to-lisp-binary-type fbty))))
 
 
-(defun fb-array-type-element-type (fbty)
-  "Return the element type of the flatbuffers array type FBTY."
+(defun fb-complex-type-to-type (fbty)
+  "Return the type metaobject associated with FBTY."
+  (gethash fbty *fb-type-map* nil))
+
+
+(defun complex-type-to-type (rep)
+  "Return the type metaobject associated with REP."
+  (gethash rep *lisp-binary-type-map* nil))
+
+
+(defun fb-complex-type-p (fbty)
+  "Test whether flatbuffers type FBTY is a complex type.
+
+Complex types are enumerations, structures, and tables."
+  (not (null (fb-complex-type-to-type fbty))))
+
+
+(defun fb-array-type-p (fbty)
+  "Test whether flatbuffers type FBTY is an array type."
   (and (listp fbty)
-       (eql (safe-car fbty) 'array)
+       (eql (safe-car fbty) 'array)))
+
+
+(defun fb-array-type-element-type (fbty)
+  "Return the element type of FBTY, if it is an arrayp
+
+This will be another flatbuffers type, either base or complex
+(but not another array type)."
+  (and (fb-array-type-p fbty)
        (safe-cadr fbty)))
 
 
-(defun fb-array-type-p (fnty)
-  "Test whether flatbuffers type FBTY is an array type."
-  (not (null (fb-array-type-element-type fbty))))
+(defun lisp-binary-type-for-fb-type (fbty)
+  "Return the LISP-BINARY type representing FBTYPE."
+  (or (fb-base-type-to-lisp-binary-type fbty)
+      (if-let ((ty (fb-complex-type-to-type fbty)))
+	(representation ty))))
 
+
+;;; ---------- Binary format ----------
+
+(defbinary fb-header (:byte-order :little-endian)
+  (root-object nil :type (pointer :pointer-type (unsigned-byte 32)
+				  :data-type fb-table)))
+
+
+(defbinary fb-vtable (:byte-order :little-endian)
+  (vtable-base nil :type base-pointer)
+  (vtable-length 0 :type (unsigned-byte 16))
+  (table-length 0 :type (unsigned-byte 16))
+  (field-offsets #1A() :type (eval `(simple-array (unsigned-byte 16) (,(/ (- vtable-length 4) 2))))))
+
+
+(defbinary fb-table (:byte-order :little-endian)
+  (table-base nil :type base-pointer)
+  (vtable nil :type (custom :reader (lambda (str)
+				      (declare (optimize debug))
+
+				      (let* ((soffset (read-integer 4 str :signed t))
+					     (there (- table-base soffset)))
+
+					(let ((vt (with-excursion (str there)
+						    (read-binary 'fb-vtable str))))
+					  (values vt 4))))
+			    :lisp-type t))
+  (body nil :type (custom :reader (lambda (str)
+				    (declare (optimize debug))
+
+				    (let* ((ty (car *expecting*))
+					   (fields (fields ty))
+					   (offsets (fb-vtable-field-offsets vtable))
+					   (constructor (symbol-function (intern (upcase (concat "make-" (symbol-name (representation ty)))))))
+					   kvs)
+
+				      ;; read the fields from the correct offsets
+				      (dolist (i (iota (length offsets)))
+					(let* ((field (elt fields i))
+					       (offset (elt offsets i))
+					       (fty (type-of (field-type field)))
+					       (k (make-keyword (name field))))
+
+					  (unless (= offset 0)
+					    (let ((f (with-excursion (str (+ table-base offset))
+						       (cond ((subtypep fty 'Struct)
+							      ;; structs appear inline
+							       (read-binary (representation field) str))
+
+							     ((eql (representation field) 'fb-string)
+							      ;; strings are indirected
+							       (with-pointer-excursion (str)
+								 (read-binary 'fb-string str)))
+
+							     ((subtypep fty 'CArray)
+							      ;; arrays may need to update the expected type
+							       (with-pointer-excursion (str)
+								 (read-binary (representation field) str)))
+
+							     ((subtypep fty 'Table)
+							      ;; tables read an fb-table
+							       (with-expecting (field-type field)
+								 (with-pointer-excursion (str)
+								   (read-binary 'fb-table str))))
+
+							     (t
+							      ;; evertything else is inline
+							       (read-binary-type (representation field) str))))))
+
+					      (appendf kvs (list k f))))))
+
+				      (let ((v (apply constructor kvs)))
+					(values v (fb-vtable-table-length vtable)))))
+			  :lisp-type t)))
+
+
+(defbinary fb-string (:byte-order :little-endian)
+  (str "" :type (counted-string 4)))
+
+
+(defbinary fb-table-array  (:byte-order :little-endian)
+  (arr #1A() :type )
+
+  )
 
 ;;; ---------- Schema element type metaobjects ----------
-
-(defgeneric lisp-binary-type-size (lbty)
-  (:documentation "Returns how many bytes are needed to encode a value of LISP-BINARY type LBTY.")
-  (:method (lbty)
-    (cond
-      ;; base types
-      ((eql lbty 'bit)
-       1)
-      ((or (equal lbty '(unsigned-byte 8))
-	   (equal lbty '(signed-byte 8)))
-       1)
-      ((or (equal lbty '(unsigned-byte 16))
-	   (equal lbty '(signed-byte 16)))
-       2)
-      ((or (equal lbty '(unsigned-byte 32))
-	   (equal lbty '(signed-byte 32)))
-       4)
-      ((eql lbty 'single-float)
-       4)
-      ((eql lbty 'double-float)
-       8)
-
-      ;; strings are stored as offsets
-      ((eql lbty 'fb-string)
-       4)
-
-      (t
-       (error "Unknown LISP-BINARY type ~a" lbty)))))
-
 
 (defclass FB-Element ()
   ((name
@@ -204,7 +291,14 @@ of or the name of a structure created with DEFBINARY."))
     :initarg :deprecated
     :initform nil
     :reader deprecated-p
-    :documentation "Flag for deprecation.")))
+    :documentation "Flag for deprecation.")
+   (type
+    :initarg :type
+    :initform nil
+    :reader field-type
+    :documentation "The type metaobject describing this field.
+
+This will be NIL if the field holds a base type.")))
 
 
 (defclass FB-Type (FB-Element)
@@ -213,7 +307,8 @@ of or the name of a structure created with DEFBINARY."))
 
 
 (defmethod initialize-instance :after ((ty FB-Type) &key &allow-other-keys)
-  (declare-lisp-binary-type ty))
+  ;; record the type metaobject
+  (declare-fb-complex-type ty))
 
 
 (defclass CArray (FB-Type)
@@ -225,12 +320,31 @@ of or the name of a structure created with DEFBINARY."))
 
 
 (defmethod initialize-instance :after ((arr CArray) &key &allow-other-keys)
-  (eval `(defbinary ,(representation arr) (:byte-order :little-endian)
-	   (arr #1A() :type (counted-array 4 ,(element-type arr))))))
+  (declare (optimize debug))
 
+  (let* ((et (element-type arr))
+	 (ety (if-let ((cl (complex-type-to-type et)))
+		(if (subtypep (type-of cl) 'Table)
+		    `(custom :reader (lambda (str)
+				       (with-expecting ,cl
+					 (let ((arr (make-array (list count))))
+					   (dotimes (i count)
+					     (let ((here (file-position str))
+						   (ptr (read-integer 4 str)))
 
-(defmethod lisp-binary-type-size ((arr CArray))
-  8)
+					       (with-excursion (str (+ here ptr))
+						 (setf (aref arr i) (read-binary 'fb-table str)))))
+
+					   (values arr (* count 4))))))
+
+		    ;; other types are inline and can be read simply
+		    `(simple-array ,et (count)))
+		`(simple-array ,et (count)))))
+
+    (eval `(defbinary ,(representation arr) (:byte-order :little-endian)
+	     (array-base 0 :type base-pointer)
+	     (count 0 :type (unsigned-byte 32))
+	     (arr #1A() :type ,ety)))))
 
 
 (defclass FB-Record (FB-Type)
@@ -248,75 +362,58 @@ of or the name of a structure created with DEFBINARY."))
 (defmethod initialize-instance :after ((ty Table) &key &allow-other-keys)
   (declare (optimize debug))
 
-  (flet ((create-field (struct field)
+  (flet ((create-field (field)
 	   "Return the LISP-BINARY field entry for FIELD."
 	   (if (deprecated-p field)
-	       struct
+	       nil
 
 	       (let* ((fbty (fb-type field))
 		      (lbty (representation field))
-		      (ty (lisp-binary-type-metaobject lbty))
-		      fields)
+		      (ty (and (fb-complex-type-p fbty)
+			       (fb-complex-type-to-type fbty))))
 
 		 ;; add the field
 		 (cond
 		   ;;strings
 		   ((eq lbty 'fb-string)
-		    (with-gensyms (base-pointer-name)
-		      (appendf fields
-			       (list `(,(name field) nil :type fb-string)))))
+		    `(,(name field) 0 :type fb-string))
 
 		   ;; base types
 		   ((fb-base-type-p fbty)
-		    (appendf fields (list `(,(name field) 0 :type ,lbty))))
+		    `(,(name field) 0 :type ,lbty))
 
 		   ;; enums
-		   ;; TBD
+		   ((subtypep (type-of ty) 'Enumeration)
+		    `(,(name field) 0 :type ,fbty))
 
 		   ;; tables
 		   ((subtypep (type-of ty) 'Table)
-		    (appendf fields
-			     (list `(,(name field) nil :type (eval (progn
-								     (push (get-type-metaobject-for-fb-type ',fbty) *expecting*)
-								     'fb-table))))))
+		    `(,(name field)0 :type fb-table))
 
 		   ;; structs
 		   ((subtypep (type-of ty) 'Struct)
-		    (appendf fields
-			     (list `(,(name field) 0 :type ,lbty))))
+		    `(,(name field) 0 :type ,lbty))
 
 		   ;; arrays
 		   ((subtypep (type-of ty) 'CArray)
-		    (with-gensyms (base-pointer-name)
-		      (appendf fields
-			       (list `(,(name field) nil :type ,lbty)))))
+		    `(,(name field) 0 :type ,lbty))
 
 		   ;; that should cover everything
 		   (t
-		    (error "No representation for ~a" ty)))
-
-		 (log:trace "Representing field ~a with ~a" (name field) struct)
-		 (append struct fields)))))
+		    (error "No representation for ~a" ty)))))))
 
     ;; create the fields
-    (let* ((fields (foldr #'create-field (fields ty) nil))
-	   (lbty (representation ty)))
+    (let ((fields (remove-if #'null (mapcar #'create-field (fields ty))))
+	  (lbty (representation ty)))
 
       (log:debug "Creating ~a to represent fb type ~a" lbty (name ty))
+
       (eval `(defbinary ,lbty (:byte-order :little-endian)
 	       ,@fields)))))
 
 
-(defmethod lisp-binary-type-size ((ty Table))
-  8)
-
-
 (defclass Enumeration (FB-Record)
   ())
-
-
-(defmethod lisp-binary-type-size ((ty Enumeration))
-  (lisp-binary-type-size (representation ty)))
 
 
 (defclass Struct (FB-Record)
@@ -326,106 +423,29 @@ of or the name of a structure created with DEFBINARY."))
 (defmethod initialize-instance :after ((ty Struct) &key &allow-other-keys)
   (declare (optimize debug))
 
-  (flet ((create-field (struct field)
+  (flet ((create-field (field)
 	   "Return the code for FIELD at the given OFFSET."
 	   ;; ignore any deprecated fields
-	   (if (deprecated-p field)
-	       struct
-
+	   (unless (deprecated-p field)
 	       (let ((lbty (representation field)))
 
-		 ;; add the fields
-		 ;; ;TODO: Need to handle all field types
+		 ;; add the field
 		 (cond
 		   ;; numbers
 		   ((subtypep lbty '(or unsigned-byte
 				     signed-byte
 				     float
 				     double))
-		    (appendf struct
-			     (list `(,(name field) 0 :type ,lbty))))
+		    `(,(name field) 0 :type ,lbty))
 
 		   (t
 		    (error "Can't handle structure field for ~a" lbty)))))))
 
-    (let ((fields (foldr #'create-field (fields ty) '()))
+    (let ((fields (remove-if #'null (mapcar #'create-field (fields ty))))
 	  (lbty (representation ty)))
 
       (eval `(defbinary ,lbty (:byte-order :little-endian)
 	       ,@fields)))))
-
-
-(defmethod lisp-binary-type-size ((ty Struct))
-  (foldr #'+ (mapcar (compose #'lisp-binary-type-size #'representation) (fields ty)) 0))
-
-
-;;; ---------- Binary format ----------
-
-(defmacro with-excursion (str there &body body)
-  "Seek STR to THERE, perform BODY, and SEEK back to where we were."
-  (with-gensyms (s here)
-    `(let* ((,s ,str)
-	    (,here (file-position ,s)))
-       (file-position ,s ,there)
-       (progn
-	 ,@body)
-       (file-position ,s ,here))))
-
-
-(defbinary fb-header (:byte-order :little-endian)
-  (root-object nil :type (pointer :pointer-type (unsigned-byte 32)
-				  :data-type fb-table)))
-
-
-(defbinary fb-vtable (:byte-order :little-endian)
-  (vtable-base nil :type base-pointer)
-  (vtable-length 0 :type (unsigned-byte 16))
-  (table-length 0 :type (unsigned-byte 16))
-  (field-offsets #1A() :type (eval `(simple-array (unsigned-byte 16) (,(/ (- vtable-length 4) 2))))))
-
-
-(defbinary fb-table (:byte-order :little-endian)
-  (table-base nil :type base-pointer)
-  (vtable nil :type (custom :reader (lambda (str)
-				       (declare (optimize debug))
-
-				       (let* ((soffset (read-integer 4 str :signed t))
-					      (there (- table-base soffset)))
-
-					 (let ((vt (let ((here (file-position str)))
-						     (file-position str there)
-						     (prog1
-							 (read-binary 'fb-vtable str)
-
-						       (file-position str here)))))
-					   (values vt 4))))
-			     :lisp-type fb-vtable))
-  (body nil :type (custom :reader (lambda (str)
-				    (declare (optimize debug))
-
-				    (let* ((ty (car *expecting*))
-					   (fields (fields ty))
-					   (offsets (fb-vtable-field-offsets vtable))
-					   (v (make-instance (representation ty))))
-				      (break)
-				      ;; read the fields from the correct offsets
-				      (dolist (i (iota (length offsets)))
-					(let ((field (elt fields i))
-					      (offset (elt offsets i)))
-					  (unless (= offset 0)
-					    (let ((v (let ((here (file-position str)))
-						       (file-position str (+ table-base offset))
-						       (prog1
-							   (read-binary (representation field) str)
-
-							 (file-position str here)))))
-					      (break)
-					      (value v 4)))))))
-			  :lisp-type t)))
-
-
-(defbinary fb-string (:byte-order :little-endian)
-  (str "" :type (counted-string 4)))
 
 
 ;;; ---------- Builder functions ----------
@@ -435,60 +455,53 @@ of or the name of a structure created with DEFBINARY."))
 ;;; in terms of LISP-BINARY types. The latter can be the built-in types for
 ;;; LISP-BINARY or the names of structures created wuth DEFBINARY.
 
-(defparameter *defbinary-struct-counter* 0
-  "Counter for building unique DEFBINARY struct names.")
+(defun make-lisp-binary-type-name (stem fbty)
+  "Return a new symbol to name a binary representation of FBTY defined with DEFBINARY.
 
-
-(defun make-lisp-binary-type-name (stem)
-  "Return a new symbol to name a binary structure defined with DEFBINARY.
-
-STEM will be used as the first part of the name."
-  (prog1
-      (intern (upcase (concat stem "-" (format nil "~a" *defbinary-struct-counter*))))
-
-    (incf *defbinary-struct-counter*)))
+STEM will be used as the first part of the name. This is just to make
+debugging slightly easier."
+  (intern (upcase (format nil "~a-~a" stem fbty))))
 
 
 (defun make-field (name vars)
   "Make a metaobject for a field NAME over the given VARS.
 
 This may involve making some auxiliary LISP-BINARY types to represent
-the conmtents of the field."
+the contents of the field."
   (declare (optimize debug))
 
   (let* ((fbty (getassoc :type vars))
 	 (meta (safe-cdr (assoc :metadata vars)))
 	 (deprecated-p (and (not (null meta))
 			    (assoc 'deprecated meta)))
-	 (lbty (or (fb-base-type-to-lisp-binary-type fbty)
+	 (lbty (or (lisp-binary-type-for-fb-type fbty)
 
 		   ;; not a base type, check for constructed types
-		   (if-let ((ty (fb-type-to-lisp-binary-type fbty)))
+		   (if-let ((ty (fb-complex-type-to-type fbty)))
 		     ;; we have a constructed type, use its representation
 		     (representation ty)
 
-		     ;; we don't have a type constructed yet
-		     (if-let ((fbet (fb-array-type-element-type fbty)))
-		       ;; we have an array, construct it
-		       (let ((et (if (fb-base-type-p fbet)
-				     ;; base type, use its translation
-				     (fb-type-to-lisp-binary-type fbet)
+		     ;; we don't have a type constructed yet, build it
+		     (if (fb-array-type-p fbty)
+			 ;; array types
+			 (let* ((fbet (fb-array-type-element-type fbty))
+				(et (lisp-binary-type-for-fb-type fbet))
+				(lbty (make-lisp-binary-type-name "fb-array" name)))
 
-				     ;; structure type, use its representation
-				     (representation (fb-type-to-lisp-binary-type fbet))))
-			     (rep (make-lisp-binary-type-name "fb-array")))
+			   (make-instance 'CArray :name lbty
+						  :fb-type fbty
+						  :element-type et
+						  :representation lbty)
+			   lbty)
 
-			 (make-instance 'CArray :fb-type fbty
-						:element-type et
-						:representation rep)
-			 rep)
-
-		       ;; not an array, any other type we reference should have
-		       ;; been constructed alreay
-		       (error "No type for ~a" fbty))))))
+			 ;; anything else we can't deal with
+			 ;TODO: Handle forward references to complex types
+			 (error "No type for ~a" fbty))))))
 
     (make-instance 'Field :name name
 			  :fb-type fbty
+			  :type (if (fb-complex-type-p fbty)
+				    (fb-complex-type-to-type fbty))
 			  :representation lbty
 			  :deprecated (not (null deprecated-p)))))
 
@@ -507,11 +520,11 @@ the conmtents of the field."
 									      :fb-type fbety
 									      :value v)))
 					  (1+ v))))))
-			    elements (list '() 0)))))
+			    elements (list '() 0))))))
 
     (make-instance 'Enumeration :name name
 				:fb-type fbety
-				:fields fields)))
+				:fields fields))
 
 
 (defun make-table (name elements)
@@ -519,7 +532,7 @@ the conmtents of the field."
 
 This may result in code to build additional types needed by the fields."
   (declare (optimize debug))
-  (let ((lbty (make-lisp-binary-type-name "fb-table"))
+  (let ((lbty (make-lisp-binary-type-name "fb-table" name))
 	(fields (mapcar (lambda (f)
 			 (destructuring-bind (field-name &rest vars)
 			     f
@@ -539,7 +552,7 @@ The code reated will create the LISP-BINARY type needed to represent the
 structure as well."
   (declare (optimize debug))
 
-  (let ((lbty (make-lisp-binary-type-name "fb-table"))
+  (let ((lbty (make-lisp-binary-type-name "fb-struct" name))
 	(fields (mapcar (lambda (f)
 			  (destructuring-bind (field-name &rest vars)
 			     f
@@ -596,13 +609,12 @@ Return the type metaobject of the root type."
     ;; empty the environment
     (setq *fb-type-map* (make-hash-table :test #'equal))
     (setq *lisp-binary-type-map* (make-hash-table))
-    (setq *vtable-type-map* (make-hash-table))
 
     ;; create the necessary classes
     (mapc #'make-object schema)
 
     ;; return the description of the root type
-    (get-type-metaobject-for-fb-type root-type)))
+    (fb-complex-type-to-type root-type)))
 
 
 (defun read-fbs (fb root-type)
