@@ -131,7 +131,7 @@ If either element is null, the pair is omitted."
 	      (zip-without-null (cdr xs) (cdr ys))))))
 
 
-;; Simplifications
+;;; ---------- Simplifications ----------
 
 ;; De-nil-ing is used for post-processing parsed filebuffer schemata,
 ;; since ESRAP teends to be verbose.
